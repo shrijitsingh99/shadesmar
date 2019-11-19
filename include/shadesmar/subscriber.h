@@ -28,18 +28,18 @@ public:
   virtual void _subscribe() = 0;
 
 protected:
-  SubscriberBase(std::string topic_name);
-  std::string topic_name_;
-  std::unique_ptr<Memory<queue_size>> topic;
+  SubscriberBase(std::string topic__name);
+  std::string topic__name_;
+  std::unique_ptr<Memory> topic_;
   uint32_t counter{};
 };
 
 template <uint32_t queue_size>
 class SubscriberBin : public SubscriberBase<queue_size> {
 public:
-  SubscriberBin(std::string topic_name,
+  SubscriberBin(std::string topic__name,
                 const std::function<void(void *, size_t)> &callback)
-      : SubscriberBase<queue_size>(topic_name), callback_(callback) {}
+      : SubscriberBase<queue_size>(topic__name), callback_(callback) {}
 
 private:
   const std::function<void(void *, size_t)> callback_;
@@ -53,10 +53,10 @@ class Subscriber : public SubscriberBase<queue_size> {
                 "msgT must derive from BaseMsg");
 
 public:
-  Subscriber(std::string topic_name,
+  Subscriber(std::string topic__name,
              const std::function<void(const std::shared_ptr<msgT> &)> &callback,
              bool extra_copy = false)
-      : SubscriberBase<queue_size>(topic_name), callback_(callback),
+      : SubscriberBase<queue_size>(topic__name), callback_(callback),
         extra_copy_(extra_copy) {}
 
 private:
@@ -67,15 +67,15 @@ private:
 };
 
 template <uint32_t queue_size>
-SubscriberBase<queue_size>::SubscriberBase(std::string topic_name)
-    : topic_name_(topic_name) {
+SubscriberBase<queue_size>::SubscriberBase(std::string topic__name)
+    : topic__name_(topic__name) {
   std::this_thread::sleep_for(std::chrono::microseconds(2000));
-  topic = std::make_unique<Memory<queue_size>>(topic_name_);
-  counter = topic->counter();
+  topic_ = std::make_unique<Memory>(topic__name_, queue_size);
+  counter = topic_->counter();
 }
 
 template <uint32_t queue_size> void SubscriberBase<queue_size>::spinOnce() {
-  if (topic->counter() <= counter) {
+  if (topic_->counter() <= counter) {
     // no new messages
     return;
   }
@@ -84,11 +84,11 @@ template <uint32_t queue_size> void SubscriberBase<queue_size>::spinOnce() {
   // pub_counter must be strictly greater than counter.
   // If they're equal, there have been no new writes.
   // If pub_counter to too far ahead, we need to catch up.
-  if (topic->counter() - counter >= queue_size) {
+  if (topic_->counter() - counter >= queue_size) {
     // If we have fallen behind by the size of the queue
     // in the case of lapping, we go to last existing
     // element in the queue.
-    counter = topic->counter() - queue_size + 1;
+    counter = topic_->counter() - queue_size + 1;
   }
 
   _subscribe();
@@ -105,7 +105,7 @@ template <uint32_t queue_size> void SubscriberBin<queue_size>::_subscribe() {
   void *msg = nullptr;
   size_t size = 0;
 
-  bool write_success = this->topic->read_raw(&msg, size, this->counter);
+  bool write_success = this->topic_->read_raw(&msg, size, this->counter);
   if (!write_success)
     return;
 
@@ -119,9 +119,9 @@ void Subscriber<msgT, queue_size>::_subscribe() {
   bool write_success;
 
   if (extra_copy_) {
-    write_success = this->topic->read_with_copy(oh, this->counter);
+    write_success = this->topic_->read_with_copy(oh, this->counter);
   } else {
-    write_success = this->topic->read_without_copy(oh, this->counter);
+    write_success = this->topic_->read_without_copy(oh, this->counter);
   }
 
   if (!write_success)

@@ -26,12 +26,12 @@ public:
 
 private:
   std::string topic_name_;
-  Memory<queue_size> mem_;
+  Memory mem_;
 };
 
 template <uint32_t queue_size>
 PublisherBin<queue_size>::PublisherBin(std::string topic_name)
-    : topic_name_(topic_name), mem_(Memory<queue_size>(topic_name)) {}
+    : topic_name_(topic_name), mem_(Memory(topic_name, queue_size)) {}
 
 template <uint32_t queue_size>
 bool PublisherBin<queue_size>::publish(void *data, size_t size) {
@@ -48,12 +48,12 @@ public:
 
 private:
   std::string topic_name_;
-  Memory<queue_size> mem_;
+  Memory mem_;
 };
 
 template <typename msgT, uint32_t queue_size>
 Publisher<msgT, queue_size>::Publisher(std::string topic_name)
-    : topic_name_(topic_name), mem_(Memory<queue_size>(topic_name)) {
+    : topic_name_(topic_name), mem_(Memory(topic_name, queue_size)) {
   static_assert(std::is_base_of<BaseMsg, msgT>::value,
                 "msgT must derive from BaseMsg");
 }

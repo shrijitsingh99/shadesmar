@@ -79,7 +79,7 @@ inline bool proc_dead(__pid_t proc) {
 
 class IPC_Lock {
 public:
-  IPC_Lock() = default;
+  IPC_Lock() : mutex_(interprocess_upgradable_mutex()) {}
   void lock() {
     // TODO: use timed_lock instead of try_lock
     while (!mutex_.try_lock()) {

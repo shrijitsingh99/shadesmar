@@ -25,83 +25,100 @@ namespace shm {
 
 static size_t max_buffer_size = (1U << 28);
 
-uint8_t *create_memory_segment(const std::string &topic, int &fd, size_t size) {
+uint8_t *create_memory_segment(const std::string &topic_name, int &fd,
+                               size_t size) {
   while (true) {
-    fd = shm_open(topic.c_str(), O_RDWR | O_CREAT | O_EXCL, 0644);
+    fd = shm_open(topic_name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0644);
     if (fd >= 0) {
       fchmod(fd, 0644);
+      ftruncate(fd, size);
     }
     if (errno == EEXIST) {
-      fd = shm_open(topic.c_str(), O_RDWR, 0644);
+      fd = shm_open(topic_name.c_str(), O_RDWR, 0644);
       if (fd < 0 && errno == ENOENT) {
         continue;
       }
     }
     break;
   }
-  ftruncate(fd, size);
+
   auto *ptr = static_cast<uint8_t *>(
       mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
 
   return ptr;
 }
 
-template <uint32_t queue_size> struct SharedQueue {
-  struct Element {
-    managed_shared_memory::handle_t addr_hdl{};
-    size_t size{};
-    bool empty = true;
-  };
-  std::atomic_uint32_t init{}, counter{};
-
-  Element elements[queue_size]{};
-  IPC_Lock info_mutex;
-  IPC_Lock queue_mutexes[queue_size];
-
-  void lock(uint32_t idx) { queue_mutexes[idx].lock(); }
-  void unlock(uint32_t idx) { queue_mutexes[idx].unlock(); }
-  void lock_sharable(uint32_t idx) { queue_mutexes[idx].lock_sharable(); }
-  void unlock_sharable(uint32_t idx) { queue_mutexes[idx].unlock_sharable(); }
+struct Element {
+  managed_shared_memory::handle_t addr_hdl{};
+  size_t size{};
+  bool empty = true;
+  IPC_Lock mutex;
 };
 
-template <uint32_t queue_size = 1> class Memory {
-  static_assert((queue_size & (queue_size - 1)) == 0,
-                "queue_size must be power of two");
+struct SharedQueue {
+  std::atomic_uint32_t init{}, counter{}, queue_size{};
+  Element *elements;
 
+  SharedQueue() {
+    init = 0;
+    elements = nullptr;
+  }
+
+  void lock(uint32_t idx) { elements[idx].mutex.lock(); }
+  void unlock(uint32_t idx) { elements[idx].mutex.unlock(); }
+  void lock_sharable(uint32_t idx) { elements[idx].mutex.lock_sharable(); }
+  void unlock_sharable(uint32_t idx) { elements[idx].mutex.unlock_sharable(); }
+};
+
+class Memory {
 public:
-  explicit Memory(const std::string &topic) : topic_(topic) {
-    // TODO: Has contention on shared_queue_exists
-    bool shared_queue_exists = tmp::exists(topic);
-    if (!shared_queue_exists)
-      tmp::write_topic(topic);
+  explicit Memory(const std::string &topic_name, uint32_t queue_size)
+      : topic_name_(topic_name), queue_size_(queue_size) {
 
-    auto *base_addr =
-        create_memory_segment(topic, fd_, sizeof(SharedQueue<queue_size>));
+    if ((queue_size & (queue_size - 1)) != 0) {
+      std::cerr << "queue_size must be power of two";
+      exit(-1);
+    }
+
+    // TODO: Has contention on shared_queue_exists
+    bool shared_queue_exists = tmp::exists(topic_name);
+    if (!shared_queue_exists)
+      tmp::write_topic(topic_name);
+
+    size_t size = sizeof(SharedQueue) + queue_size * sizeof(Element);
+
+    auto *base_addr = create_memory_segment(topic_name, fd_, size);
+    auto *elem_addr = base_addr + sizeof(SharedQueue);
+    DEBUG("FD="<<fd_);
 
     raw_buf_ = std::make_shared<managed_shared_memory>(
-        open_or_create, (topic + "Raw").c_str(), max_buffer_size);
+        open_or_create, (topic_name + "Raw").c_str(), max_buffer_size);
 
     if (!shared_queue_exists) {
-      shared_queue_ = new (base_addr) SharedQueue<queue_size>();
+      shared_queue_ = new (base_addr) SharedQueue();
+      auto blank = new Element[queue_size];
+      std::memcpy(shared_queue_->elements, blank, queue_size * sizeof(Element));
       init_info();
     } else {
-      shared_queue_ = reinterpret_cast<SharedQueue<queue_size> *>(base_addr);
+      shared_queue_ = reinterpret_cast<SharedQueue *>(base_addr);
+      shared_queue_->elements = reinterpret_cast<Element *>(elem_addr);
     }
+
+    queue_size_ = shared_queue_->queue_size;
   }
 
   ~Memory() = default;
 
   void init_info() {
-    shared_queue_->info_mutex.lock();
-    if (shared_queue_->init != INFO_INIT) {
-      shared_queue_->init = INFO_INIT;
+    uint32_t zero = 0;
+    if (shared_queue_->init.compare_exchange_strong(zero, INFO_INIT)) {
+      shared_queue_->queue_size = queue_size_;
       shared_queue_->counter = 0;
     }
-    shared_queue_->info_mutex.unlock();
   }
 
   bool write(void *data, size_t size) {
-    uint32_t pos = counter() & (queue_size - 1); // modulo for power of 2
+    uint32_t pos = counter() & (queue_size_ - 1); // modulo for power of 2
     shared_queue_->lock(pos);
 
     if (size > raw_buf_->get_free_memory()) {
@@ -128,7 +145,7 @@ public:
   }
 
   bool read_without_copy(msgpack::object_handle &oh, uint32_t pos) {
-    pos &= queue_size - 1;
+    pos &= queue_size_ - 1;
     shared_queue_->lock_sharable(pos);
     auto elem = &(shared_queue_->elements[pos]);
     if (elem->empty)
@@ -148,7 +165,7 @@ public:
   }
 
   bool read_with_copy(msgpack::object_handle &oh, uint32_t pos) {
-    pos &= queue_size - 1;
+    pos &= queue_size_ - 1;
     shared_queue_->lock_sharable(pos);
     auto elem = &(shared_queue_->elements[pos]);
     if (elem->empty)
@@ -173,7 +190,7 @@ public:
   }
 
   bool read_raw(void **msg, size_t &size, uint32_t pos) {
-    pos &= queue_size - 1;
+    pos &= queue_size_ - 1;
     shared_queue_->lock_sharable(pos);
     auto elem = &(shared_queue_->elements[pos]);
     if (elem->empty)
@@ -199,10 +216,11 @@ public:
   }
 
 private:
+  uint32_t queue_size_;
   int fd_;
-  std::string topic_;
+  std::string topic_name_;
   std::shared_ptr<managed_shared_memory> raw_buf_;
-  SharedQueue<queue_size> *shared_queue_;
+  SharedQueue *shared_queue_;
 };
 } // namespace shm
 #endif // shadesmar_MEMORY_H
