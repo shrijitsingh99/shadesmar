@@ -15,6 +15,7 @@ endif()
 if (APPLE)
   if("${CMAKE_OSX_DEPLOYMENT_TARGET}" STREQUAL "10.14")
     set(CMAKE_CXX_STANDARD 11)
+  endif()
 endif()
 
 if(UNIX AND NOT APPLE)
