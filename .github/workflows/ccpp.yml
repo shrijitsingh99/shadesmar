@@ -21,7 +21,10 @@ jobs:
 
   build-macos:
 
-        runs-on: macOS-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macOS-10.15, ubuntu-10.14]
 
         steps:
         - uses: actions/checkout@v1
