@@ -3,7 +3,7 @@ name: C/C++ CI
 on: [push, pull_request]
 
 jobs:
-  build:
+  build-ubuntu:
 
     runs-on: ubuntu-latest
 
@@ -15,3 +15,16 @@ jobs:
       run: mkdir build && cd build && cmake ..
     - name: build
       run: cmake --build build
+
+  build-macos:
+
+        runs-on: macOS-latest
+
+        steps:
+        - uses: actions/checkout@v1
+        - name: dependencies
+          run: brew install msgpack
+        - name: configure
+          run: mkdir build && cd build && cmake ..
+        - name: build
+          run: cmake --build build
