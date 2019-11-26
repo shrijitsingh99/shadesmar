@@ -12,6 +12,6 @@ jobs:
     - name: dependencies
       run: sudo apt update && sudo apt install libboost-all-dev libmsgpack-dev
     - name: configure
-      run: ./configure
-    - name: make
-      run: make
+      run: mkdir build && cd build && cmake ..
+    - name: build
+      run: cmake --build build
