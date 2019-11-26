@@ -23,7 +23,7 @@ jobs:
         steps:
         - uses: actions/checkout@v1
         - name: dependencies
-          run: brew install msgpack
+          run: brew install boost msgpack
         - name: configure
           run: mkdir build && cd build && cmake ..
         - name: build
