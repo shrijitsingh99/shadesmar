@@ -2,4 +2,4 @@
 
 mkdir build
 cd build
-cmake -D Boost_DEBUG=ON
+cmake -D CMAKE_FIND_DEBUG_MODE=ON ..
