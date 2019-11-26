@@ -10,7 +10,7 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - name: dependencies
-      run: sudo apt install libmsgpack-dev
+      run: sudo apt install libmsgpack-dev &&
            echo $BOOST_ROOT
     - name: configure
       run: ./configure
